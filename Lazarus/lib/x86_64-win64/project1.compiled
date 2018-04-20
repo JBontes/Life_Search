@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<CONFIG>
+  <Compiler Value="C:\lazarus\fpc\3.0.0\bin\x86_64-win64\fpc.exe" Date="1231859847"/>
+  <Params Value=" -Twin64 -Px86_64 -CpATHLON64 -Rintel -MDelphiUnicode -Scagi -Os4 -g -gl -WG -l -vewnhibq -FiC:\Users\Johan\Documents\Embarcadero\Studio\Projects\Life64\Lazarus\lib\x86_64-win64 -FuC:\Users\Johan\Documents\Embarcadero\Studio\Projects\Life64\Lazarus\lib\x86_64-win64 -FuC:\lazarus\components\sdf\lib\x86_64-win64\win32 -FuC:\lazarus\components\lazcontrols\lib\x86_64-win64\win32 -FuC:\lazarus\lcl\units\x86_64-win64\win32 -FuC:\lazarus\lcl\units\x86_64-win64 -FuC:\lazarus\components\lazutils\lib\x86_64-win64 -FuC:\lazarus\packager\units\x86_64-win64 -FuC:\Users\Johan\Documents\Embarcadero\Studio\Projects\Life64\Lazarus\ -FUC:\Users\Johan\Documents\Embarcadero\Studio\Projects\Life64\Lazarus\lib\x86_64-win64\ -dLCL -dLCLwin32 project1.lpr"/>
+</CONFIG>

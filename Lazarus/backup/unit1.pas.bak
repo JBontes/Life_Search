@@ -1,0 +1,731 @@
+unit Unit1;
+
+{$mode delphi}{$H+}
+
+interface
+
+uses
+  Classes, SysUtils, FileUtil, ExtendedNotebook, Forms, Controls,
+  Graphics, Dialogs, ExtCtrls, ComCtrls, Menus, ActnList, StdCtrls,
+  {$ifdef Win64}
+  Windows
+  {$endif};
+
+type
+
+  { TDiBits }
+
+  TDiBits = record
+  public
+    function Stride: integer; inline;
+    class function Create: TDIBits; static;
+  public
+    bmpinfo: PBitmapInfo;
+    data: PByte;
+    width, height: cardinal;
+  end;
+
+
+
+
+  { TUnit }
+
+const
+  BytesPerUnit = 16;
+  MaxBytesPerUnit = BytesPerUnit -1;
+
+type
+  PUnit = ^TUnit;
+  TUnit = record
+    procedure Display(const BitmapStart: pointer; const LineOffset: integer);
+    case integer of
+      1: (b: array[0..MaxBytesPerUnit] of byte);
+      2: (w: array[0..(BytesPerUnit div 2)-1] of word);
+      3: (i: array[0..(BytesPerUnit div 4)-1] of integer);
+      4: (q: array[0..(BytesPerUnit div 8)-1] of int64);
+  end;
+
+const
+  UnitsPerBlock = 16*8;
+
+type
+
+  PCellBlock = ^TCellBlock;
+
+  { TCellBlock }
+
+  TCellBlock = record
+  public
+    procedure DisplayQ(const DrawSurface: TDIBits);
+    procedure DisplayP(const DrawSurface: TDIBits);
+  public
+    p: array[0..UnitsPerBlock-1] of TUnit;
+    q: array[0..UnitsPerBlock-1] of TUnit;
+  end;
+
+  { CellBlockHelper }
+
+  CellBlockHelper = record helper for PCellBlock
+    class function New: PCellBlock; static;
+    procedure Free;
+  end;
+
+  { TForm1 }
+
+  TForm1 = class(TForm)
+    Button1: TButton;
+    Button2: TButton;
+    MainMenu1: TMainMenu;
+    Timer1: TTimer;
+    View_DrawMode: TAction;
+    View_SelectMode: TAction;
+    View_ZoomMode: TAction;
+    View_ScrollMode: TAction;
+    View_Grid: TAction;
+    Edit_PastemodeNand: TAction;
+    Edit_PastemodeOr: TAction;
+    Edit_PasteModeAnd: TAction;
+    Edit_PastemodeXor: TAction;
+    Edit_PasteModeNormal: TAction;
+    Edit_Rotate180: TAction;
+    Edit_RotateLeft: TAction;
+    Edit_RotateRight: TAction;
+    Edit_MirrorVert: TAction;
+    Edit_MirrorHorz: TAction;
+    Edit_SelectAll: TAction;
+    Edit_Clear: TAction;
+    Edit_FillRandom: TAction;
+    Edit_Paste: TAction;
+    Edit_Copy: TAction;
+    Edit_Cut: TAction;
+    Animate_FastForward: TAction;
+    Animate_Slower: TAction;
+    Animate_Faster: TAction;
+    Animate_StepForward: TAction;
+    Animate_StepBack: TAction;
+    Animate_Pause: TAction;
+    Animate_Run: TAction;
+    ActionList1: TActionList;
+    ExtendedNotebook1: TExtendedNotebook;
+    ImageList24x24: TImageList;
+    ImageList16x16: TImageList;
+    Panel1: TPanel;
+    Panel2: TPanel;
+    Panel3: TPanel;
+    Panel4: TPanel;
+    ScrollBox1: TScrollBox;
+    Splitter1: TSplitter;
+    TabSheet1: TTabSheet;
+    TabSheet2: TTabSheet;
+    TabSheet3: TTabSheet;
+    procedure Animate_RunExecute(Sender: TObject);
+    procedure Button1Click(Sender: TObject);
+    procedure FormCreate(Sender: TObject);
+    procedure FormShow(Sender: TObject);
+    procedure ScrollBox1Click(Sender: TObject);
+    procedure Timer1Timer(Sender: TObject);
+  private
+    FDrawSurfaceP: TDIBits;
+    FDrawSurfaceQ: TDIBits;
+    FCellBlock: TCellBlock;
+    FEmpty: TUnit;
+    Generation: integer;
+    procedure Generate;
+    procedure Draw;
+    procedure GeneratePtoQ;
+    procedure GenerateQtoP;
+  public
+    { public declarations }
+  end;
+
+var
+  Form1: TForm1;
+
+implementation
+
+{$R *.lfm}
+
+{ TForm1 }
+
+procedure DisplayBitmap(const Canvas: TCanvas; const Rect: TRect; const Bitmap: TDIBits);
+var
+  //color: PRGBQUAD;
+  setter: PByte;
+  ScanlineWidth: Integer;
+  i: Integer;
+  //y,h: integer;
+begin
+  ScanlineWidth:= Bitmap.width div 8;
+  if (ScanlineWidth mod 4) <> 0 then Inc(ScanlineWidth, 4 - ScanlineWidth mod 4);
+
+  //GetMem(data_buffer, ScanlineWidth * height);
+
+  { Set checkerboard pattern }
+  setter:= Bitmap.data;
+  for i:= 1 to ((ScanlineWidth * Bitmap.height) div 4) do begin
+    if odd((i*4) div ScanLineWidth)  then PCardinal(setter)^:= $55555555
+    else PCardinal(setter)^:= $AAAAAAAA;
+
+    Inc(setter, SizeOf(Cardinal));
+  end;
+//  function SetDIBitsToDevice(DC: HDC; DestX, DestY: Integer; Width, Height: DWORD;
+//  SrcX, SrcY: Integer; nStartScan, NumScans: UINT; Bits: Pointer;
+//  var BitsInfo: TBitmapInfo; Usage: UINT): Integer; stdcall;
+
+  //SetDIBitstoDevice(Canvas.Handle, 0, 0, width, height, 0, 0, 0, height, data_buffer, bmpinfo^, DIB_RGB_COLORS);
+  //Banding
+  //h:= Bitmap.height div 4;
+  //y:= 0;
+
+  StretchDIBits(Form1.ScrollBox1.Canvas.Handle, 0,0,128*4-1,128*4-1,0,0,127,127, Bitmap.data, Bitmap.bmpinfo^, DIB_RGB_COLORS, SRCCOPY);
+end;
+
+function GeneratePtoQ_AVX(main, N,W,NW: PUnit): byte; forward;
+
+function GenerateQtoP_AVX(Main, S,E,SE: PUnit): byte;
+asm
+    //parameters:
+    //rcx - PMain
+    //rdx - PS
+    //r8 - PE
+    //r9 - PSE
+    //returns cellstate in AL.
+    //and result in XMM0
+    mov rbp, rsp// for correct debugging
+    // A cell looks like this:
+    //   DCB   876
+    //   AxA   504
+    //   DCB   321
+    // we're using half-adder logic to store the 1, 2 and 4's count in 3 bitplanes.
+    movdqu xmm15,[rcx]          //***** xmm15 8-D'
+    movdqu xmm1,[rdx]
+    movdqu xmm2,[r8]
+    movdqu xmm3,[r9]
+    //now create 9 planes, each one slightly shifted.
+    //xmm0 is the center plane.
+    vpsrldq xmm3,xmm3,16-4       //keep the top 2 rows of SE and shift them to the bottom
+    vpsrldq xmm6,xmm1,16-2       //S5    keep the top 1 rows of S and shift them to the bottom.
+    vpsrldq xmm1,xmm1,16-4       //S3    keep the top 2 rows of S and shift them to the bottom.
+    vpsrlw xmm2,xmm2,14          //E6    keep the 2 leftmost rows of E
+    vpsrlw xmm3,xmm3,14          //SE1   keep the 2 leftmost rows of SE
+    vpslldq xmm5,xmm15,4         //main3
+    vpslldq xmm4,xmm15,2         //main5
+    vpxor xmm14,xmm1,xmm5        //***** xmm14 3 - D
+    vpxor xmm13,xmm4,xmm6        //***** xmm13 5 - A'
+    //we are done with S, xmm1
+    vpsrlw xmm1,xmm2,1           //E7
+    vpsllw xmm7,xmm15,1          //main7
+    vpsllw xmm8,xmm13,1          //main0+S0
+    vpsllw xmm9,xmm14,1          //main2+S2
+    vpxor xmm12,xmm7,xmm1        //***** xmm12 7 - C
+    vpsllw xmm7,xmm7,1           //main6
+    vpxor xmm11,xmm7,xmm2        //***** xmm11 6 - B'
+    vpslldq xmm10,xmm11,2        //main4+E4
+    vpsrldq xmm7,xmm3,2          //SE4
+    vpsllw xmm6,xmm6,2           //S4
+    vpxor xmm10,xmm10,xmm7       //main4+E4+S4
+    vpxor xmm10,xmm10,xmm6       //***** xmm10 4 - A
+    vpslldq xmm1,xmm1,2          //E0
+    vpsrlw xmm7,xmm7,1           //SE0
+    vpxor xmm0,xmm8,xmm1         //main0+S0+E0
+    vpxor xmm0,xmm0,xmm7         //***** xmm0 0 - x
+    vpslldq xmm1,xmm2,4          //E1
+    vpsllw xmm8,xmm9,1           //main1+S1
+    vpxor xmm8,xmm8,xmm1         //main1+S1+E1
+    vpxor xmm8,xmm8,xmm3         //**** xmm8 1 - B
+    vpsrlw xmm4,xmm1,1           //E2
+    vpsrlw xmm5,xmm3,1           //SE2
+    vpxor xmm1,xmm4,xmm5         //E2+SE2
+    vpxor xmm9,xmm9,xmm1         //main2+S2+E2+SE2
+    //First get all the counts
+    vpxor xmm1,xmm8,xmm9         //1's count of c
+    vpand xmm2,xmm8,xmm9         //2's count of c
+    vpxor xmm3,xmm10,xmm11       //1's count of a
+    vpand xmm4,xmm10,xmm11       //2's count of a
+    vpxor xmm5,xmm12,xmm13       //1's count of b
+    vpand xmm6,xmm12,xmm13       //2's count of b
+    vpxor xmm7,xmm14,xmm15       //1's count of d
+    vpand xmm8,xmm14,xmm15       //2's count of d
+    //Sow add the 1's together
+    vpand xmm10,xmm1,xmm3        //2's count of CA
+    vpxor xmm1,xmm1,xmm3         //combined ones of CA
+    vpand xmm12,xmm5,xmm7        //2's count of BD
+    vpxor xmm5,xmm5,xmm7         //combined ones of BD
+    vpand xmm14,xmm1,xmm5        //2's count of CABD
+    vpxor xmm1,xmm1,xmm5         //final count of the 1's
+    //now we need to add all the 2's together.
+    vpand xmm3,xmm2,xmm4         //4's count of ca
+    vpxor xmm2,xmm2,xmm4         //2's count of ca
+    vpand xmm5,xmm6,xmm8         //4's count of bd
+    vpxor xmm6,xmm6,xmm8         //2's count of bd
+    vpand xmm7,xmm10,xmm12       //4's count of CABD
+    vpxor xmm8,xmm10,xmm12       //2's count of CABD
+    vpand xmm9,xmm2,xmm6         //4's count of cabd
+    vpxor xmm4,xmm2,xmm6         //2's count of cabd
+    vpand xmm11,xmm8,xmm14       //4's count of CABD+abcd
+    vpxor xmm12,xmm8,xmm14       //2's count of CABD+abcd
+    //add all 4's
+    vpor xmm15,xmm3,xmm5
+    vpor xmm13,xmm7,xmm9
+    vpor xmm14,xmm11,xmm15
+    //add the 2's
+    vpxor xmm2,xmm12,xmm4
+    //final add
+    vpor xmm4,xmm14,xmm13
+    //now we have all the counts.
+    //register usage:
+    //xmm0 - original pattern
+    //xmm1 - count of the ones
+    //xmm2 - count of the twos
+    //xmm4 - count of the fours
+    vpand xmm7,xmm0,xmm2         //anything with a 2 stays the same
+    vpand xmm3,xmm2,xmm1         //anything with a 3 is alive
+    vpor xmm1,xmm7,xmm3          //add the alive cells
+    xor eax,eax                  //clear the cell status
+    //Record the changes in S,E,SE.
+    //This will influence the N,W,NW in the next generation.
+    //The status bit work as follows
+    //xmm    8    7    6    5    4    3    2    1
+    //bit    7----6----5----4----3----2----1----0
+    //       +    same         |  dead          +
+    //       SE   E    S   all   SE   E    S   all
+    vpandn xmm1,xmm1,xmm4        //subtract the cells with 4 or more neighbors
+    vpxor xmm15,xmm15,xmm15            //xmm15 holds a 0
+    vpxor xmm9,xmm0,xmm1         //see which cells have changed
+    vpslldq xmm2,xmm1,16-4       //new S
+    vpslldq xmm6,xmm9,16-4       //changes in S
+    vpsllw xmm3,xmm1,16-2        //new E
+    vpsllw xmm7,xmm9,16-2        //changes in E
+    vpsllw xmm4,xmm2,16-2        //new SE
+    vpsllw xmm8,xmm6,16-2        //changes in SE
+    // test the 2 qwords in each vector against zero
+    vpcmpeqq xmm11, xmm1, xmm15
+    vpcmpeqq xmm12, xmm3, xmm15
+    vpcmpeqq xmm13, xmm5, xmm15
+    vpcmpeqq xmm14, xmm7, xmm15
+
+    // blend the results down into xmm10   word origin
+    vpblendw xmm10, xmm11, xmm12, $AA   // 3131 3131
+    vpblendw xmm13, xmm13, xmm14, $AA   // 7575 7575
+    vpblendw xmm10, xmm10, xmm13, $CC   // 7531 7531
+
+    // test the 2 qwords in each vector against zero
+    vpcmpeqq xmm11, xmm2, xmm15
+    vpcmpeqq xmm12, xmm4, xmm15
+    vpcmpeqq xmm13, xmm6, xmm15
+    vpcmpeqq xmm14, xmm8, xmm15
+
+    // blend the results down into xmm11   word origin
+    vpblendw xmm11, xmm11, xmm12, $AA   // 4242 4242
+    vpblendw xmm13, xmm13, xmm14, $AA   // 8686 8686
+    vpblendw xmm11, xmm11, xmm13, $CC   // 8642 8642
+
+    //combine bytes of xmm10 and xmm11 together into xmm10, byte wise
+    // xmm10 77553311 77553311
+    // xmm11 88664422 88664422   before shift
+    // xmm10 07050301 07050301
+    // xmm11 80604020 80604020   after shift
+    //result 87654321 87654321   combined
+    vpsrlw xmm10,xmm10,8
+    vpsllw xmm11,xmm11,8
+    vpor xmm10,xmm10,xmm11
+
+    //combine the low and high dqword to make sure both are zero.
+    vpsrldq xmm12,xmm10,8
+    vpand xmm10,xmm10,xmm12
+    vpmovmskb eax,xmm10
+    //P and Q are stored in the same memory block.
+    //first an array of 128 P block (16 bytes each) and then an array of 128 Q blocks (16 bytes each).
+    movdqu [rcx-2048],xmm1       //store the result of the calculation
+    not eax
+    or al, ah
+    //xmm0 is the old unit
+    //xmm1 is the new unit
+    //al holds the status
+end;
+
+{ TCellBlock }
+
+{$pointermath on}
+
+procedure TCellBlock.DisplayQ(const DrawSurface: TDIBits);
+var
+  i: integer;
+  x,y: integer;
+begin
+  for i:= 0 to 127 do begin
+    x:= i and 7 * 2;
+    y:= i shr 3 * 16;
+    Self.q[i].Display(@DrawSurface.data[x+y], 128);
+  end;
+end;
+
+procedure TCellBlock.DisplayP(const DrawSurface: TDIBits);
+var
+  i: integer;
+  x,y: integer;
+begin
+  for i:= 0 to 127 do begin
+    x:= i and 7 * 2;
+    y:= i shr 3 * 16;
+    Self.p[i].Display(@DrawSurface.data[x+y], 128);
+  end;
+end;
+
+
+procedure TForm1.Generate;
+begin
+  if Odd(Generation) then GeneratePtoQ
+  else GenerateQtoP;
+  Inc(Generation);
+end;
+
+procedure TForm1.Draw;
+begin
+  case Odd(Generation) of
+    true: begin
+      FCellBlock.DisplayP(FDrawSurfaceP);
+      StretchDIBits(Form1.ScrollBox1.Canvas.Handle, 0,0,128*4-1,128*4-1,0,0,127,127, FDrawSurfaceP.data, FDrawSurfaceP.bmpinfo^, DIB_RGB_COLORS, SRCCOPY);
+    end;
+    false: begin
+      FCellBlock.DisplayQ(FDrawSurfaceQ);
+      StretchDIBits(Form1.ScrollBox1.Canvas.Handle, 1,1,128*4,128*4,0,0,127,127, FDrawSurfaceQ.data, FDrawSurfaceQ.bmpinfo^, DIB_RGB_COLORS, SRCCOPY);
+    end;
+  end;
+end;
+
+procedure TForm1.GeneratePtoQ;
+var
+  i: integer;
+  N,W,NW: PUnit;
+  NIndex, WIndex, NWIndex: integer;
+begin
+  for i:= 0 to 127 do begin
+    if (i >= 8) and ((i and 7) <> 0) then begin
+      NIndex:= i - 8;
+      WIndex:= i - 1;
+      NWIndex:= i - 9;
+      N:= @FCellBlock.p[NIndex];
+      W:= @FCellBlock.p[WIndex];
+      NW:= @FCellBlock.p[NWIndex];
+    end else begin
+      if i < 8 then begin
+        N:= @FEmpty;
+        NW:= @FEmpty;
+      end;
+      if (i and 7) = 0 then begin
+        W:= @FEmpty;
+        NW:= @FEmpty;
+      end;
+    end;
+    GeneratePtoQ_AVX(@FCellBlock.p[i],N,W,NW);
+  end;
+end;
+
+procedure TForm1.GenerateQtoP;
+var
+  i: integer;
+  S,E,SE: PUnit;
+  Sindex, EIndex, SEIndex: integer;
+begin
+  for i:= 0 to 127 do begin
+    if (i < 120) and ((i and 7) <> 7) then begin
+      SIndex:= i + 8;
+      EIndex:= i + 1;
+      SEIndex:= i + 9;
+      S:= @FCellBlock.q[SIndex];
+      E:= @FCellBlock.q[EIndex];
+      SE:= @FCellBlock.q[SEIndex];
+    end else begin
+      if i > 120 then begin
+        S:= @FEmpty;
+        SE:= @FEmpty;
+      end;
+      if (i and 7) = 7 then begin
+        E:= @FEmpty;
+        SE:= @FEmpty;
+      end;
+    end;
+    GenerateQtoP_AVX(@FCellBlock.q[i],S,E,SE);
+  end;
+end;
+
+function GeneratePtoQ_AVX(main, N,W,NW: PUnit): byte;
+asm
+    //parameters
+    //rcx: main
+    //rdx: N
+    //r8: W
+    //r9: NW
+    // A cell looks like this:
+    //   BCD   123
+    //   AxA   405
+    //   BCD   678
+    // we're using half-adder logic to store the 1, 2 and 4's count in 3 bitplanes.
+    movdqu xmm15,[rcx]          //***** xmm15 8-D'
+    movdqu xmm1,[rdx]
+    movdqu xmm2,[r8]
+    movdqu xmm3,[r9]
+    //now create 9 planes, each one slightly shifted.
+    //xmm0 is the center plane.
+    vpslldq xmm3,xmm3,16-4       //keep the bottom 2 rows of NW and shift them to the top
+    vpslldq xmm6,xmm1,16-2       //S5    keep the bottom 1 rows of N and shift them to the top.
+    vpslldq xmm1,xmm1,16-4       //S3    keep the bottom 2 rows of N and shift them to the top.
+    vpsllw xmm2,xmm2,14          //E6    keep the 2 rightmost rows of W
+    vpsllw xmm3,xmm3,14          //SE1   keep the 2 rightmost rows of NW
+    vpsrldq xmm5,xmm15,4         //main3
+    vpsrldq xmm4,xmm15,2         //main5
+    vpxor xmm14,xmm1,xmm5        //***** xmm14 3 - D
+    vpxor xmm13,xmm4,xmm6        //***** xmm13 5 - A'
+    //we are done with S, xmm1
+    vpsllw xmm1,xmm2,1           //W7
+    vpsrlw xmm7,xmm15,1          //main7
+    vpsrlw xmm8,xmm13,1          //main0+N0
+    vpsrlw xmm9,xmm14,1          //main2+N2
+    vpxor xmm12,xmm7,xmm1        //***** xmm12 7 - C
+    vpsrlw xmm7,xmm7,1           //main6
+    vpxor xmm11,xmm7,xmm2        //***** xmm11 6 - B'
+    vpsrldq xmm10,xmm11,2        //main4+W4
+    vpslldq xmm7,xmm3,2          //NW4
+    vpsrlw xmm6,xmm6,2           //N4
+    vpxor xmm10,xmm10,xmm7       //main4+W4+N4
+    vpxor xmm10,xmm10,xmm6       //***** xmm10 4 - A
+    vpsrldq xmm1,xmm1,2          //W0
+    vpsllw xmm7,xmm7,1           //NW0
+    vpxor xmm0,xmm8,xmm1         //main0+N0+W0
+    vpxor xmm0,xmm0,xmm7         //***** xmm0 0 - x
+    vpsrldq xmm1,xmm2,4          //W1
+    vpsrlw xmm8,xmm9,1           //main1+N1
+    vpxor xmm8,xmm8,xmm1         //main1+N1+W1
+    vpxor xmm8,xmm8,xmm3         //**** xmm8 1 - B
+    vpsllw xmm4,xmm1,1           //W2
+    vpsllw xmm5,xmm3,1           //NW2
+    vpxor xmm1,xmm4,xmm5         //W2+NW2
+    vpxor xmm9,xmm9,xmm1         //main2+N2+W2+NW2
+    //First get all the counts
+    vpxor xmm1,xmm8,xmm9         //1's count of c
+    vpand xmm2,xmm8,xmm9         //2's count of c
+    vpxor xmm3,xmm10,xmm11       //1's count of a
+    vpand xmm4,xmm10,xmm11       //2's count of a
+    vpxor xmm5,xmm12,xmm13       //1's count of b
+    vpand xmm6,xmm12,xmm13       //2's count of b
+    vpxor xmm7,xmm14,xmm15       //1's count of d
+    vpand xmm8,xmm14,xmm15       //2's count of d
+    //Sow add the 1's together
+    vpand xmm10,xmm1,xmm3        //2's count of CA
+    vpxor xmm1,xmm1,xmm3         //combined ones of CA
+    vpand xmm12,xmm5,xmm7        //2's count of BD
+    vpxor xmm5,xmm5,xmm7         //combined ones of BD
+    vpand xmm14,xmm1,xmm5        //2's count of CABD
+    vpxor xmm1,xmm1,xmm5         //final count of the 1's
+    //now we need to add all the 2's together.
+    vpand xmm3,xmm2,xmm4         //4's count of ca
+    vpxor xmm2,xmm2,xmm4         //2's count of ca
+    vpand xmm5,xmm6,xmm8         //4's count of bd
+    vpxor xmm6,xmm6,xmm8         //2's count of bd
+    vpand xmm7,xmm10,xmm12       //4's count of CABD
+    vpxor xmm8,xmm10,xmm12       //2's count of CABD
+    vpand xmm9,xmm2,xmm6         //4's count of cabd
+    vpxor xmm4,xmm2,xmm6         //2's count of cabd
+    vpand xmm11,xmm8,xmm14       //4's count of CABD+abcd
+    vpxor xmm12,xmm8,xmm14       //2's count of CABD+abcd
+    //add all 4's
+    vpor xmm15,xmm3,xmm5
+    vpor xmm13,xmm7,xmm9
+    vpor xmm14,xmm11,xmm15
+    //add the 2's
+    vpxor xmm2,xmm12,xmm4
+    //final add
+    vpor xmm4,xmm14,xmm13
+    //now we have all the counts.
+    //register usage:
+    //xmm0 - original pattern
+    //xmm1 - count of the ones
+    //xmm2 - count of the twos
+    //xmm4 - count of the fours
+    vpand xmm8,xmm0,xmm2         //anything with a 2 stays the same
+    vpand xmm3,xmm2,xmm1         //anything with a 3 is alive
+    vpor xmm1,xmm8,xmm3          //add the alive cells
+    xor eax,eax                  //clear the cell status
+    //We have now generated Q from P.
+    //We want to know the changes in key sectors of Q, and will check N,W,NW
+    //because this will become the S,E,SE of the next generation.
+    //bit 7 of al will be shifted into bit 16 of eax at a later stage and so on....
+    //The status bit work as follows
+    //xmm    8    7    6    5    4    3    2    1
+    //bit    7----6----5----4----3----2----1----0
+    //       +    same      |  dead             +
+    //       NW   W    N   all   NW   W    N   all
+    vpandn xmm1,xmm1,xmm4        //subtract the cells with 4 or more neighbors
+    vpxor xmm15,xmm15,xmm15            //xmm15 holds a 0
+    vpxor xmm9,xmm0,xmm1         //see which cells have changed
+    vpsrldq xmm2,xmm1,16-4       //new N
+    vpsrldq xmm6,xmm9,16-4       //changes in N
+    vpsrlw xmm3,xmm1,16-2        //new W
+    vpsrlw xmm7,xmm9,16-2        //changes in W
+    vpsrlw xmm4,xmm2,16-2        //new NW
+    vpsrlw xmm8,xmm6,16-2        //changes in NW
+    // test the 2 qwords in each vector against zero
+    vpcmpeqq xmm11, xmm1, xmm15
+    vpcmpeqq xmm12, xmm3, xmm15
+    vpcmpeqq xmm13, xmm5, xmm15
+    vpcmpeqq xmm14, xmm7, xmm15
+
+    // blend the results down into xmm10   word origin
+    vpblendw xmm10, xmm11, xmm12, $AA   // 3131 3131
+    vpblendw xmm13, xmm13, xmm14, $AA   // 7575 7575
+    vpblendw xmm10, xmm10, xmm13, $CC   // 7531 7531
+
+    // test the 2 qwords in each vector against zero
+    vpcmpeqq xmm11, xmm2, xmm15
+    vpcmpeqq xmm12, xmm4, xmm15
+    vpcmpeqq xmm13, xmm6, xmm15
+    vpcmpeqq xmm14, xmm8, xmm15
+
+    // blend the results down into xmm11   word origin
+    vpblendw xmm11, xmm11, xmm12, $AA   // 4242 4242
+    vpblendw xmm13, xmm13, xmm14, $AA   // 8686 8686
+    vpblendw xmm11, xmm11, xmm13, $CC   // 8642 8642
+
+    //combine bytes of xmm10 and xmm11 together into xmm10, byte wise
+    // xmm10 77553311 77553311
+    // xmm11 88664422 88664422   before shift
+    // xmm10 07050301 07050301
+    // xmm11 80604020 80604020   after shift
+    //result 87654321 87654321   combined
+    vpsrlw xmm10,xmm10,8
+    vpsllw xmm11,xmm11,8
+    vpor xmm10,xmm10,xmm11
+
+    //combine the low and high dqword to make sure both are set (indicating the orginal was zero).
+    vpsrldq xmm12,xmm10,8
+    vpand xmm10,xmm10,xmm12
+    vpmovmskb eax,xmm10
+    //P and Q are stored in the same memory block.
+    //first an array of 128 P block (16 bytes each) and then an array of 128 Q blocks (16 bytes each).
+    movdqu [rcx+2048],xmm1       //store the result of the calculation
+    not eax
+    or al, ah
+    //xmm0 is the old unit
+    //xmm1 is the new unit
+    //al holds the status
+end;
+
+{ CellBlockHelper }
+
+class function CellBlockHelper.New: PCellBlock;
+begin
+  Result:= GetMem(SizeOf(TCellBlock));
+end;
+
+procedure CellBlockHelper.Free;
+begin
+  FreeMem(@Self);
+end;
+
+{ TDiBits }
+
+function TDiBits.Stride: integer;
+begin
+  Result:= 128 div 8;
+end;
+
+class function TDiBits.Create: TDIBits;
+var
+  ScanLineWidth: integer;
+  color: PRGBQuad;
+begin
+  with Result do begin
+    ScanlineWidth:= 128 div 8;
+    if (ScanlineWidth mod 4) <> 0 then Inc(ScanlineWidth, 4 - ScanlineWidth mod 4);
+    GetMem(bmpinfo, SizeOf(TBitmapInfo) + SizeOf(TRGBQUAD));
+    GetMem(data, ScanlineWidth * height);
+    color:= @bmpinfo^.bmiColors[0];
+    color^.rgbRed:= 255;
+    color^.rgbBlue:= 255;
+    color^.rgbGreen:= 255;
+    color^.rgbReserved:= 0;
+    Inc(color);
+    color^.rgbRed:= 0;
+    color^.rgbBlue:= 0;
+    color^.rgbGreen:= 0;
+    color^.rgbReserved:= 0;
+
+    with bmpinfo.bmiHeader do begin
+      biSize:= SizeOf(bmpinfo.bmiHeader);
+      biWidth:= width;
+      biHeight:= height;
+      biPlanes:= 1;
+      biBitCount:= 1;
+      biCompression:= BI_RGB;
+      biSizeImage:= 0;
+      biXPelsPerMeter:= 0;
+      biYPelsPerMeter:= 0;
+      biClrUsed:= 0;
+      biClrImportant:= 0;
+    end;
+  end;
+end;
+
+{ TUnit }
+
+procedure TUnit.Display(const BitmapStart: pointer; const LineOffset: integer);
+asm
+  ///  rcx = self
+  ///  rdx = bitmapstart
+  ///  r8  = LineOffset
+  mov rax,[rcx]    //get the first 4 lines.
+  mov r9,[rcx+64]
+  mov [rdx],ax     //store the first line
+  shr rax,16
+  mov [rdx+r8],ax
+  shr rax,16
+  lea rdx,[rdx+r8*2]
+  mov [rdx],ax
+  shr rax,16
+  mov [rdx+r8],ax
+  lea rdx,[rdx+r8*2]
+  mov [rdx],r9w
+  shr r9,16
+  mov [rdx+r8],r9w
+  shr r9,16
+  lea rdx,[rdx+r8*2]
+  mov [rdx],r9w
+  shr r9,16
+  mov [rdx+r8],r9w
+end;
+
+
+procedure TForm1.Animate_RunExecute(Sender: TObject);
+begin
+
+end;
+
+procedure TForm1.Button1Click(Sender: TObject);
+begin
+  Timer1.Enabled:= not Timer1.Enabled;
+end;
+
+procedure TForm1.FormCreate(Sender: TObject);
+begin
+  FDrawSurfaceP:= TDIBits.Create;
+  FDrawSurfaceQ:= TDIBits.Create;
+end;
+
+procedure TForm1.FormShow(Sender: TObject);
+begin
+end;
+
+procedure TForm1.ScrollBox1Click(Sender: TObject);
+begin
+
+end;
+
+procedure TForm1.Timer1Timer(Sender: TObject);
+begin
+  Generate;
+  Draw;
+end;
+
+end.
+

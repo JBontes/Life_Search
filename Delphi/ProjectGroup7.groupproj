@@ -1,0 +1,48 @@
+﻿<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+    <PropertyGroup>
+        <ProjectGuid>{4CFC8315-716C-4D21-9D6F-A9A5AA30BBA4}</ProjectGuid>
+    </PropertyGroup>
+    <ItemGroup>
+        <Projects Include="Life64.dproj">
+            <Dependencies/>
+        </Projects>
+        <Projects Include="SatProject.dproj">
+            <Dependencies/>
+        </Projects>
+    </ItemGroup>
+    <ProjectExtensions>
+        <Borland.Personality>Default.Personality.12</Borland.Personality>
+        <Borland.ProjectType/>
+        <BorlandProject>
+            <Default.Personality/>
+        </BorlandProject>
+    </ProjectExtensions>
+    <Target Name="Life64">
+        <MSBuild Projects="Life64.dproj"/>
+    </Target>
+    <Target Name="Life64:Clean">
+        <MSBuild Projects="Life64.dproj" Targets="Clean"/>
+    </Target>
+    <Target Name="Life64:Make">
+        <MSBuild Projects="Life64.dproj" Targets="Make"/>
+    </Target>
+    <Target Name="SatProject">
+        <MSBuild Projects="SatProject.dproj"/>
+    </Target>
+    <Target Name="SatProject:Clean">
+        <MSBuild Projects="SatProject.dproj" Targets="Clean"/>
+    </Target>
+    <Target Name="SatProject:Make">
+        <MSBuild Projects="SatProject.dproj" Targets="Make"/>
+    </Target>
+    <Target Name="Build">
+        <CallTarget Targets="Life64;SatProject"/>
+    </Target>
+    <Target Name="Clean">
+        <CallTarget Targets="Life64:Clean;SatProject:Clean"/>
+    </Target>
+    <Target Name="Make">
+        <CallTarget Targets="Life64:Make;SatProject:Make"/>
+    </Target>
+    <Import Project="$(BDS)\Bin\CodeGear.Group.Targets" Condition="Exists('$(BDS)\Bin\CodeGear.Group.Targets')"/>
+</Project>

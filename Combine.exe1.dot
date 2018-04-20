@@ -1,0 +1,92 @@
+digraph IacaAnalysisGraph{
+0 [label="0. movdqu xmm0, xmmword ptr [rdx]", style=filled, color=cyan]
+1 [label="1. movdqu xmm1, xmmword ptr [rdx+0x10]", style=filled, color=cyan]
+2 [label="2. movdqu xmm2, xmmword ptr [r8]", style=filled, color=cyan]
+3 [label="3. movdqu xmm3, xmmword ptr [r8+0x10]", style=filled, color=cyan]
+4 [label="4. movdqu xmm4, xmmword ptr [rcx]", style=filled, color=cyan]
+5 [label="5. movdqu xmm5, xmmword ptr [rcx+0x10]", style=filled, color=cyan]
+6 [label="6. movdqu xmm6, xmmword ptr [r9]", style=filled, color=cyan]
+7 [label="7. movdqu xmm7, xmmword ptr [r9+0x10]", style=filled, color=cyan]
+8 [label="8. pand xmm0, xmm2", style=filled, color=cyan]
+9 [label="9. pand xmm1, xmm3", style=filled, color=pink]
+10 [label="10. movdqa xmm2, xmm4", style=filled, color=cyan]
+11 [label="11. movdqa xmm3, xmm5", style=filled, color=cyan]
+12 [label="12. pand xmm4, xmm0", style=filled, color=cyan]
+13 [label="13. pand xmm5, xmm1", style=filled, color=cyan]
+14 [label="14. pand xmm0, xmm6", style=filled, color=cyan]
+15 [label="15. pand xmm1, xmm7", style=filled, color=pink]
+16 [label="16. movdqu xmmword ptr [rcx], xmm4", style=filled, color=cyan]
+17 [label="17. movdqu xmmword ptr [rcx+0x10], xmm5", style=filled, color=cyan]
+18 [label="18. movdqu xmmword ptr [r9], xmm0", style=filled, color=cyan]
+19 [label="19. movdqu xmmword ptr [r9+0x10], xmm1", style=filled, color=cyan]
+20 [label="20. pcmpeqq xmm2, xmm4", style=filled, color=cyan]
+21 [label="21. pcmpeqq xmm3, xmm5", style=filled, color=cyan]
+22 [label="22. pand xmm2, xmm3", style=filled, color=cyan]
+23 [label="23. pshufd xmm2, xmm2, 0xcc", style=filled, color=cyan]
+24 [label="24. pcmpeqq xmm0, xmm6", style=filled, color=cyan]
+25 [label="25. pcmpeqq xmm1, xmm7", style=filled, color=pink]
+26 [label="26. pand xmm0, xmm1", style=filled, color=pink]
+27 [label="27. pshufd xmm0, xmm0, 0xcc", style=filled, color=pink]
+28 [label="28. xor eax, eax", style=filled, color=cyan]
+29 [label="29. mov ecx, 0x1", style=filled, color=cyan]
+30 [label="30. mov edx, 0x2", style=filled, color=cyan]
+31 [label="31. movq r8, xmm2", style=filled, color=cyan]
+32 [label="32. movq r9, xmm0", style=filled, color=pink]
+33 [label="33. cmp r8, 0xffffffffffffffff", style=filled, color=cyan]
+34 [label="34. cmovz ecx, eax", style=filled, color=cyan]
+35 [label="35. cmp r9, 0xffffffffffffffff", style=filled, color=pink]
+36 [label="36. cmovz edx, eax", style=filled, color=pink]
+37 [label="37. lea eax, ptr [ecx+edx*1]", style=filled, color=cyan]
+2 -> 8
+0 -> 8
+3 -> 9
+1 -> 9
+4 -> 10
+5 -> 11
+8 -> 12
+4 -> 12
+9 -> 13
+5 -> 13
+6 -> 14
+8 -> 14
+7 -> 15
+9 -> 15
+12 -> 16
+13 -> 17
+14 -> 18
+15 -> 19
+12 -> 20
+10 -> 20
+13 -> 21
+11 -> 21
+21 -> 22
+20 -> 22
+22 -> 23
+6 -> 24
+14 -> 24
+7 -> 25
+15 -> 25
+25 -> 26
+24 -> 26
+26 -> 27
+23 -> 31
+27 -> 32
+31 -> 33
+33 -> 34
+28 -> 34
+32 -> 35
+35 -> 36
+28 -> 36
+36 -> 0
+36 -> 1
+31 -> 2
+31 -> 3
+34 -> 4
+34 -> 5
+32 -> 6
+32 -> 7
+34 -> 16
+34 -> 17
+32 -> 18
+32 -> 19
+}
